@@ -1,0 +1,63 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: echo-service
+  annotations:
+    # kubernetes.io/tls-acme: "true"
+    kubernetes.io/ingress.class: "nghttpx"
+spec:
+  tls:
+  - hosts:
+    - api.staging.purposehood.com
+    secretName: api-staging-purposehood-tls
+  rules:
+  - host: api.staging.purposehood.com
+    http:
+      paths:
+      - path: /Echo/
+        backend:
+          serviceName: echo-service
+          servicePort: 8083
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-service
+spec:
+  ports:
+  - port: 8083
+    protocol: TCP
+  selector:
+    app: echo-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: charlie-service
+spec:
+  ports:
+  - port: 8083
+    protocol: TCP
+  selector:
+    app: charlie-service
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: charlie-service
+  annotations:
+    # kubernetes.io/tls-acme: "true"
+    kubernetes.io/ingress.class: "nghttpx"
+spec:
+  tls:
+  - hosts:
+    - api.staging.purposehood.com
+    secretName: api-staging-purposehood-tls
+  rules:
+  - host: api.staging.purposehood.com
+    http:
+      paths:
+      - path: /Charlie/
+        backend:
+          serviceName: charlie-service
+          servicePort: 8083
