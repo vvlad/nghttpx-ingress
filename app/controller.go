@@ -17,7 +17,7 @@ func Run(config *options.NGHttpxConfig) error {
 	serviceController := controllers.NewServiceController(config)
 	go serviceController.Run(stopCh)
 
-	nghttpxProcessController := controllers.NewNGHttpxProcessController()
+	nghttpxProcessController := controllers.NewNGHttpxProcessController(config)
 	go nghttpxProcessController.Run(stopCh)
 
 	nghttpxConfigurationController := controllers.NewNGHttpxConfigurationController(config, controllers.NGHttpx{

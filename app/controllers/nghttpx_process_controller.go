@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang/glog"
+	"github.com/vvlad/nghttpx-ingress/app/options"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 type NGHttpxProcessController struct {
 	ConfigChannel chan string
 	cmd           *exec.Cmd
+	options       *options.NGHttpxConfig
 }
 
 func nghttpxBinaryPath() (string, error) {
@@ -45,10 +47,11 @@ func nghttpxCommand() *exec.Cmd {
 	return exec.Command(cmdPath, "--conf", ngHttpXConfigFile)
 }
 
-func NewNGHttpxProcessController() *NGHttpxProcessController {
+func NewNGHttpxProcessController(options *options.NGHttpxConfig) *NGHttpxProcessController {
 	return &NGHttpxProcessController{
 		ConfigChannel: make(chan string),
 		cmd:           nghttpxCommand(),
+		options:       options,
 	}
 }
 
@@ -65,7 +68,7 @@ func (n *NGHttpxProcessController) Start() bool {
 func (n *NGHttpxProcessController) Stop() {
 	if n.cmd.Process != nil {
 		n.cmd.Process.Kill()
-		n.cmd.Process.Wait()
+		n.cmd.Wait()
 	}
 }
 
@@ -101,10 +104,11 @@ func (n *NGHttpxProcessController) Run(stopCh <-chan struct{}) {
 }
 
 func (n *NGHttpxProcessController) startHTTPServer() {
-	glog.Infoln("Starting default 404 server on 127.0.0.1:8080")
+	address := fmt.Sprintf("0.0.0.0:%s", n.options.HealthPort)
+	glog.Infoln("Starting healthz service on ", address)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, "NotFound")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, "503 Service Unavailable")
 	})
-	glog.Fatal(http.ListenAndServe("127.0.0.1:8080", nil))
+	glog.Fatal(http.ListenAndServe(address, nil))
 }

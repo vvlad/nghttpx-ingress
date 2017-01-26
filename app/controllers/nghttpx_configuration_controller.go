@@ -24,17 +24,19 @@ type NGHttpx struct {
 }
 
 type NGHttpxServerConfig struct {
-	Backends  []Backend
-	NoTLSPort string
-	TLSPort   string
+	Backends     []Backend
+	NoTLSPort    string
+	TLSPort      string
+	FallbackPort string
 }
 
 func NewNGHttpxServerConfig(backends []Backend, options *options.NGHttpxConfig) NGHttpxServerConfig {
 	sort.Sort(ByBackend(backends))
 	return NGHttpxServerConfig{
-		Backends:  backends,
-		NoTLSPort: options.Port,
-		TLSPort:   options.TLSPort,
+		Backends:     backends,
+		NoTLSPort:    options.Port,
+		TLSPort:      options.TLSPort,
+		FallbackPort: options.HealthPort,
 	}
 }
 
@@ -51,7 +53,7 @@ var (
 	nghttpTemplate = `frontend=*,{{.NoTLSPort}};no-tls
 frontend=*,{{.TLSPort}};no-tls{{range $service := .Backends}}
 backend={{$service.Address}},{{$service.Port}};{{$service.Hostname}}{{$service.Path}};proto=h2;{{end}}
-backend=127.0.0.1,8080;;
+backend=127.0.0.1,{{.FallbackPort}};;
 `
 )
 

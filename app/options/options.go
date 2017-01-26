@@ -17,21 +17,25 @@ type NGHttpxConfig struct {
 	ResyncPeriod time.Duration
 	Port         string
 	TLSPort      string
+	HealthPort   string
 }
 
 func NewNGHttpxConfig() *NGHttpxConfig {
-	return &NGHttpxConfig{}
+	return &NGHttpxConfig{
+		ResyncPeriod: 1 * time.Second,
+		TLSPort:      "30443",
+		Port:         "30080",
+		HealthPort:   "8080",
+	}
 }
 
 func (s *NGHttpxConfig) AddFlags(fs *pflag.FlagSet) {
-	s.ResyncPeriod = 1 * time.Second
-	s.TLSPort = "30443"
-	s.Port = "30080"
 	fs.StringVar(&s.configFile, "kubeconfig", s.configFile, "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
 	fs.StringVar(&s.master, "master", s.master, "The address of the Kubernetes API server (overrides any value in kubeconfig)")
 	fs.DurationVar(&s.ResyncPeriod, "resync-period", s.ResyncPeriod, "The sync interval")
 	fs.StringVar(&s.Port, "port", s.Port, "no-tls port")
 	fs.StringVar(&s.TLSPort, "tls-port", s.TLSPort, "tls port")
+	fs.StringVar(&s.HealthPort, "healthz-port", s.TLSPort, "Health port for /healthz endpoint")
 	config.DefaultFeatureGate.AddFlag(fs)
 }
 

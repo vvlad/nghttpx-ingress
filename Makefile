@@ -1,6 +1,6 @@
 all: push
 
-TAG = 0.0.1
+TAG = 0.0.2
 PREFIX = docker.a1z.eu:5000/nghttpx-ingress
 
 REPO_INFO=$(shell git config --get remote.origin.url)
