@@ -35,7 +35,7 @@ func (s *NGHttpxConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&s.ResyncPeriod, "resync-period", s.ResyncPeriod, "The sync interval")
 	fs.StringVar(&s.Port, "port", s.Port, "no-tls port")
 	fs.StringVar(&s.TLSPort, "tls-port", s.TLSPort, "tls port")
-	fs.StringVar(&s.HealthPort, "healthz-port", s.TLSPort, "Health port for /healthz endpoint")
+	fs.StringVar(&s.HealthPort, "healthz-port", s.HealthPort, "Health port for /healthz endpoint")
 	config.DefaultFeatureGate.AddFlag(fs)
 }
 
