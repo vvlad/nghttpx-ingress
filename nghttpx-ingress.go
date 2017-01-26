@@ -27,6 +27,8 @@ func main() {
 
 	verflag.PrintAndExitIfRequested()
 
+	s.Run()
+
 	if err := app.Run(s); err != nil {
 		fmt.Printf("%v\n", err)
 		os.Exit(1)

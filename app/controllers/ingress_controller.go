@@ -2,71 +2,53 @@ package controllers
 
 import (
 	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/vvlad/nghttpx-ingress/app/options"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/pkg/api"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/apis/extensions/v1beta1"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
+	"time"
 )
 
-type IngressController struct {
-	Updates chan BackendEvent
-	client  *clientset.Clientset
+type ingressController struct {
+	client          *clientset.Clientset
+	Store           cache.Store
+	CacheController cache.Controller
 }
 
-func NewIngressController(clientset *clientset.Clientset) *IngressController {
-	return &IngressController{
-		Updates: make(chan BackendEvent),
-		client:  clientset,
+func NewIngressController(options *options.NGHttpxConfig) *ingressController {
+	c := ingressController{
+		client: options.Client,
 	}
+
+	c.Store, c.CacheController = cache.NewInformer(&c, &v1beta1.Ingress{}, 1*time.Second, &c)
+	return &c
 }
 
-func (i *IngressController) updateIngress(ingress *v1beta1.Ingress) {
-
-	for _, rule := range ingress.Spec.Rules {
-		for _, path := range rule.HTTP.Paths {
-			i.Updates <- BackendEvent{
-				Type:        Added,
-				Namespace:   ingress.ObjectMeta.Namespace,
-				ServiceName: path.Backend.ServiceName,
-				ServicePort: path.Backend.ServicePort.String(),
-				Backend: Backend{
-					Port:     path.Backend.ServicePort.String(),
-					Hostname: rule.Host,
-					Path:     path.Path,
-				},
-			}
-		}
-	}
+func (c *ingressController) List(options metav1.ListOptions) (runtime.Object, error) {
+	return c.client.ExtensionsV1beta1().Ingresses(api.NamespaceAll).List(options)
 }
 
-func (i *IngressController) removeIngress(ingress *v1beta1.Ingress) {
-
+func (c *ingressController) Watch(options metav1.ListOptions) (watch.Interface, error) {
+	return c.client.ExtensionsV1beta1().Ingresses(api.NamespaceAll).Watch(options)
 }
 
-func (i *IngressController) Run() {
-	watcher, err := i.client.Ingresses(api.NamespaceAll).Watch(v1.ListOptions{})
-	if err != nil {
-		glog.Fatalln(err)
-	}
+func (c *ingressController) OnAdd(obj interface{}) {
+	c.Store.Add(obj)
+}
+func (c *ingressController) OnUpdate(oldObj, newObj interface{}) {
+	c.Store.Delete(oldObj)
+	c.Store.Add(newObj)
+}
 
-	methods := map[watch.EventType]func(*v1beta1.Ingress){
-		watch.Added:    i.updateIngress,
-		watch.Modified: i.updateIngress,
-		watch.Deleted:  i.removeIngress,
-	}
+func (c *ingressController) OnDelete(obj interface{}) {
+	c.Store.Delete(obj)
+}
 
-	for event := range watcher.ResultChan() {
-		ingress, ok := event.Object.(*v1beta1.Ingress)
-		if !ok {
-			continue
-		}
-		if ingress.ObjectMeta.GetAnnotations()["kubernetes.io/ingress.class"] != "nghttpx" {
-			glog.Warningf("discarding ingress `%s' due to missing annotation\n", ingress.Name)
-			continue
-		}
-		if method := methods[event.Type]; method != nil {
-			method(ingress)
-		}
-	}
+func (c *ingressController) Run(stopCh <-chan struct{}) {
+	glog.Infoln("Running ...")
+	c.CacheController.Run(stopCh)
 }
