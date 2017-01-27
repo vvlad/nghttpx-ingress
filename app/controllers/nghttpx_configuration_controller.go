@@ -62,8 +62,7 @@ type NGHttpxConfigurationController struct {
 }
 
 var (
-	nghttpTemplate = `frontend=*,{{.NoTLSPort}};no-tls
-frontend=*,{{.TLSPort}};tls{{range $service := .Backends}}
+	nghttpTemplate = `frontend=*,{{.TLSPort}};tls{{range $service := .Backends}}
 backend={{$service.Address}},{{$service.Port}};{{$service.Hostname}}{{$service.Path}};proto=h2;{{end}}
 backend=127.0.0.1,{{.FallbackPort}};;{{range $cert := .Certs}}
 subcert={{$cert.KeyPath}}:{{$cert.CertPath}}{{end}}

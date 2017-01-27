@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -113,12 +114,32 @@ func (n *NGHttpxProcessController) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
+func (n *NGHttpxProcessController) redirectToHttps(w http.ResponseWriter, req *http.Request) {
+
+	if req.URL.Path == "/healthz" {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "ok")
+		return
+	}
+
+	host := req.Host
+	if n.options.Port != "80" {
+		host = strings.Replace(host, n.options.Port, n.options.TLSPort, 1)
+	}
+	target := "https://" + host + req.URL.Path
+	if len(req.URL.RawQuery) > 0 {
+		target += "?" + req.URL.RawQuery
+	}
+	http.Redirect(w, req, target, http.StatusPermanentRedirect)
+}
+
 func (n *NGHttpxProcessController) startHTTPServer() {
 	address := fmt.Sprintf("0.0.0.0:%s", n.options.HealthPort)
 	glog.Infoln("Starting healthz service on ", address)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, "503 Service Unavailable")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "404 Not Found")
 	})
-	glog.Fatal(http.ListenAndServe(address, nil))
+	go http.ListenAndServe(fmt.Sprintf("0.0.0.0:%s", n.options.Port), http.HandlerFunc(n.redirectToHttps))
+	http.ListenAndServe(address, nil)
 }
