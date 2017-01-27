@@ -26,13 +26,19 @@ func nghttpxBinaryPath() (string, error) {
 	}
 
 	for _, path := range paths {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			continue
+		if fileExists(path) {
+			return path, nil
 		}
-		return path, nil
 	}
 
 	return "", errors.New("path not found")
+}
+
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false
+	}
+	return true
 }
 
 var (
@@ -44,7 +50,11 @@ func nghttpxCommand() *exec.Cmd {
 	if err != nil {
 		glog.Fatalln(err)
 	}
-	return exec.Command(cmdPath, "--conf", ngHttpXConfigFile)
+	if fileExists("/etc/ssl/private/ssl-cert-snakeoil.key") {
+		return exec.Command(cmdPath, "--conf", ngHttpXConfigFile, "/etc/ssl/private/ssl-cert-snakeoil.key", "/etc/ssl/certs/ssl-cert-snakeoil.pem")
+	} else {
+		return exec.Command(cmdPath, "--conf", ngHttpXConfigFile)
+	}
 }
 
 func NewNGHttpxProcessController(options *options.NGHttpxConfig) *NGHttpxProcessController {

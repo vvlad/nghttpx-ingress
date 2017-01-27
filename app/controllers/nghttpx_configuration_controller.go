@@ -2,9 +2,13 @@ package controllers
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"github.com/golang/glog"
 	"github.com/vvlad/nghttpx-ingress/app/options"
+	"io"
+	"io/ioutil"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/apis/extensions/v1beta1"
@@ -18,32 +22,40 @@ import (
 type NGHttpx struct {
 	Ingress                   cache.Store
 	Service                   cache.Store
+	TLS                       cache.Store
 	DefaultHttpBackendService string
 	Controllers               []cache.Controller
 	ConfigChannel             chan string
 }
 
-type NGHttpxServerConfig struct {
+type TLS struct {
+	CertPath string
+	KeyPath  string
+}
+
+type NGHttpxConfig struct {
 	Backends     []Backend
 	NoTLSPort    string
 	TLSPort      string
 	FallbackPort string
+	Certs        []TLS
 }
 
-func NewNGHttpxServerConfig(backends []Backend, options *options.NGHttpxConfig) NGHttpxServerConfig {
+func NewNGHttpxConfig(backends []Backend, options *options.NGHttpxConfig, certs []TLS) NGHttpxConfig {
 	sort.Sort(ByBackend(backends))
-	return NGHttpxServerConfig{
+	return NGHttpxConfig{
 		Backends:     backends,
 		NoTLSPort:    options.Port,
 		TLSPort:      options.TLSPort,
 		FallbackPort: options.HealthPort,
+		Certs:        certs,
 	}
 }
 
-type nghttpxConfigurationController struct {
+type NGHttpxConfigurationController struct {
 	client   *clientset.Clientset
 	ticker   *time.Ticker
-	config   NGHttpxServerConfig
+	config   NGHttpxConfig
 	template *template.Template
 	options  *options.NGHttpxConfig
 	NGHttpx
@@ -51,25 +63,26 @@ type nghttpxConfigurationController struct {
 
 var (
 	nghttpTemplate = `frontend=*,{{.NoTLSPort}};no-tls
-frontend=*,{{.TLSPort}};no-tls{{range $service := .Backends}}
+frontend=*,{{.TLSPort}};tls{{range $service := .Backends}}
 backend={{$service.Address}},{{$service.Port}};{{$service.Hostname}}{{$service.Path}};proto=h2;{{end}}
-backend=127.0.0.1,{{.FallbackPort}};;
+backend=127.0.0.1,{{.FallbackPort}};;{{range $cert := .Certs}}
+subcert={{$cert.KeyPath}}:{{$cert.CertPath}}{{end}}
 `
 )
 
-func NewNGHttpxConfigurationController(options *options.NGHttpxConfig, config NGHttpx) *nghttpxConfigurationController {
+func NewNGHttpxConfigurationController(options *options.NGHttpxConfig, config NGHttpx) *NGHttpxConfigurationController {
 	backends := make([]Backend, 0)
-	return &nghttpxConfigurationController{
+	return &NGHttpxConfigurationController{
 		NGHttpx:  config,
 		client:   options.Client,
 		ticker:   time.NewTicker(options.ResyncPeriod),
-		config:   NewNGHttpxServerConfig(backends, options),
+		config:   NewNGHttpxConfig(backends, options, []TLS{}),
 		options:  options,
 		template: template.Must(template.New("config").Parse(nghttpTemplate)),
 	}
 }
 
-func (n *nghttpxConfigurationController) Run(stopCh <-chan struct{}) {
+func (n *NGHttpxConfigurationController) Run(stopCh <-chan struct{}) {
 	glog.Infoln("Running ...")
 	n.update(n.config)
 	for _ = range n.ticker.C {
@@ -78,26 +91,34 @@ func (n *nghttpxConfigurationController) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
-func (n *nghttpxConfigurationController) CheckAndReload() {
+func (n *NGHttpxConfigurationController) CheckAndReload() {
 	if !n.controllersInSync() {
 		glog.Warningln("Delaying checking changes ...")
 		return
 	}
 
 	newBackends := make([]Backend, 0)
+	tlsCerts := make([]TLS, 0)
 	for _, ingressObject := range n.Ingress.List() {
 		ingress := ingressObject.(*v1beta1.Ingress)
 		newBackends = append(newBackends, n.buildBackends(ingress)...)
+
+		for _, tls := range ingress.Spec.TLS {
+			secret := n.findTLSSecret(fmt.Sprintf("%s/%s", ingress.Namespace, tls.SecretName))
+			if secret != nil {
+				tlsCerts = append(tlsCerts, createTLSCert(secret, tls.Hosts))
+			}
+		}
 	}
 
-	newConfig := NewNGHttpxServerConfig(newBackends, n.options)
+	newConfig := NewNGHttpxConfig(newBackends, n.options, tlsCerts)
 
 	if !reflect.DeepEqual(n.config, newConfig) {
 		n.update(newConfig)
 	}
 }
 
-func (n *nghttpxConfigurationController) update(config NGHttpxServerConfig) {
+func (n *NGHttpxConfigurationController) update(config NGHttpxConfig) {
 	glog.Warningln("Configuration changed")
 	var doc bytes.Buffer
 	if err := n.template.ExecuteTemplate(&doc, "config", config); err != nil {
@@ -108,7 +129,7 @@ func (n *nghttpxConfigurationController) update(config NGHttpxServerConfig) {
 	n.config = config
 }
 
-func (n *nghttpxConfigurationController) controllersInSync() bool {
+func (n *NGHttpxConfigurationController) controllersInSync() bool {
 	for _, c := range n.Controllers {
 		if !c.HasSynced() {
 			return false
@@ -117,7 +138,7 @@ func (n *nghttpxConfigurationController) controllersInSync() bool {
 	return true
 }
 
-func (n *nghttpxConfigurationController) buildBackends(ingress *v1beta1.Ingress) []Backend {
+func (n *NGHttpxConfigurationController) buildBackends(ingress *v1beta1.Ingress) []Backend {
 	backends := make([]Backend, 0)
 	for _, rule := range ingress.Spec.Rules {
 		for _, path := range rule.HTTP.Paths {
@@ -140,9 +161,43 @@ func (n *nghttpxConfigurationController) buildBackends(ingress *v1beta1.Ingress)
 	return backends
 }
 
-func (n *nghttpxConfigurationController) findService(key string) *v1.Service {
+func (n *NGHttpxConfigurationController) findService(key string) *v1.Service {
 	if object, exists, err := n.Service.GetByKey(key); err == nil && exists {
 		return object.(*v1.Service)
 	}
 	return nil
+}
+
+func (n *NGHttpxConfigurationController) findTLSSecret(key string) *v1.Secret {
+	if object, exists, err := n.TLS.GetByKey(key); err == nil && exists {
+		return object.(*v1.Secret)
+	}
+	return nil
+}
+
+func createTLSCert(secret *v1.Secret, hosts Hosts) TLS {
+	h := md5.New()
+	sort.Sort(hosts)
+	for _, host := range hosts {
+		io.WriteString(h, host)
+	}
+	h.Write(secret.Data["tls.crt"])
+	h.Write(secret.Data["tls.key"])
+	sum := hex.EncodeToString(h.Sum(nil))
+
+	certPath := fmt.Sprintf("/tmp/ssl-%s.pem", sum)
+	if !fileExists(certPath) {
+		ioutil.WriteFile(certPath, secret.Data["tls.crt"], 0644)
+	}
+
+	keyPath := fmt.Sprintf("/tmp/ssl-%s.key", sum)
+	if !fileExists(keyPath) {
+		ioutil.WriteFile(keyPath, secret.Data["tls.key"], 0644)
+	}
+
+	tlsCert := TLS{
+		CertPath: certPath,
+		KeyPath:  keyPath,
+	}
+	return tlsCert
 }

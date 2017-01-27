@@ -37,11 +37,17 @@ func (c *ingressController) Watch(options metav1.ListOptions) (watch.Interface, 
 }
 
 func (c *ingressController) OnAdd(obj interface{}) {
-	c.Store.Add(obj)
+	ingress := obj.(*v1beta1.Ingress)
+	if ingress.ObjectMeta.GetAnnotations()["kubernetes.io/ingress.class"] == "nghttpx" {
+		c.Store.Add(obj)
+	}
 }
 func (c *ingressController) OnUpdate(oldObj, newObj interface{}) {
 	c.Store.Delete(oldObj)
-	c.Store.Add(newObj)
+	ingress := newObj.(*v1beta1.Ingress)
+	if ingress.ObjectMeta.GetAnnotations()["kubernetes.io/ingress.class"] == "nghttpx" {
+		c.Store.Add(newObj)
+	}
 }
 
 func (c *ingressController) OnDelete(obj interface{}) {

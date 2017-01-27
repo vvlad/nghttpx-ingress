@@ -25,7 +25,7 @@ func NewNGHttpxConfig() *NGHttpxConfig {
 		ResyncPeriod: 1 * time.Second,
 		TLSPort:      "30443",
 		Port:         "30080",
-		HealthPort:   "8080",
+		HealthPort:   "10254",
 	}
 }
 
